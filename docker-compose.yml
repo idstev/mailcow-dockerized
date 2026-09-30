@@ -1,5 +1,25 @@
 services:
 
+    cert-init:
+      image: alpine:3.20
+      command: >
+        sh -c "
+        apk add --no-cache openssl &&
+        mkdir -p /ssl &&
+        if [ ! -f /ssl/cert.pem ] || [ ! -f /ssl/key.pem ]; then
+          openssl req -x509 -newkey rsa:4096
+          -keyout /ssl/key.pem
+          -out /ssl/cert.pem
+          -days 365
+          -nodes
+          -sha256
+          -subj '/C=EC/ST=Pichincha/L=Quito/O=mailcow/OU=mailcow/CN=${MAILCOW_HOSTNAME}';
+        fi
+        "
+      volumes:
+        - ./data/assets/ssl:/ssl
+      restart: "no"
+
     unbound-mailcow:
       image: ghcr.io/mailcow/unbound:1.26.1-1
       environment:
@@ -254,9 +274,14 @@ services:
     dovecot-mailcow:
       image: ghcr.io/mailcow/dovecot:2.3.21.1-2
       depends_on:
-        - mysql-mailcow
-        - netfilter-mailcow
-        - redis-mailcow
+        cert-init:
+          condition: service_completed_successfully
+        mysql-mailcow:
+          condition: service_started
+        netfilter-mailcow:
+          condition: service_started
+        redis-mailcow:
+          condition: service_started
       dns:
         - ${IPV4_NETWORK:-172.22.1}.254
       cap_add:
@@ -341,6 +366,8 @@ services:
     postfix-mailcow:
       image: ghcr.io/mailcow/postfix:3.10.12-1
       depends_on:
+        cert-init:
+          condition: service_completed_successfully
         mysql-mailcow:
           condition: service_started
         unbound-mailcow:
@@ -415,10 +442,16 @@ services:
 
     nginx-mailcow:
       depends_on:
-        - redis-mailcow
-        - php-fpm-mailcow
-        - sogo-mailcow
-        - rspamd-mailcow
+        cert-init:
+          condition: service_completed_successfully
+        redis-mailcow:
+          condition: service_started
+        php-fpm-mailcow:
+          condition: service_started
+        sogo-mailcow:
+          condition: service_started
+        rspamd-mailcow:
+          condition: service_started
       image: ghcr.io/mailcow/nginx:1.30.4-1
       dns:
         - ${IPV4_NETWORK:-172.22.1}.254
